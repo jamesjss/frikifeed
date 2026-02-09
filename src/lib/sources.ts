@@ -1,4 +1,4 @@
-import type { InterestKey } from "@/lib/interests";
+import type { InterestDefinition } from "@/lib/interests";
 
 export type SourceConfig = {
   id: string;
@@ -6,7 +6,7 @@ export type SourceConfig = {
   websiteUrl: string;
   feedUrl: string;
   description: string;
-  interests: InterestKey[];
+  topics: string[];
   relatedSourceIds: string[];
 };
 
@@ -18,17 +18,17 @@ export const SOURCES: SourceConfig[] = [
     name: "Hacker News",
     websiteUrl: "https://news.ycombinator.com",
     feedUrl: "https://hnrss.org/frontpage",
-    description: "Noticias y lanzamientos tech en general.",
-    interests: ["java_spring", "devops", "ia", "seguridad"],
-    relatedSourceIds: ["lobsters", "devops-com", "towards-data"]
+    description: "Noticias de ingeniería, startups y cultura hacker.",
+    topics: ["backend", "frontend", "cloud", "devops", "ia", "seguridad", "open-source"],
+    relatedSourceIds: ["lobsters", "devops-com", "towards-data", "vidaextra"]
   },
   {
     id: "lobsters",
     name: "Lobsters",
     websiteUrl: "https://lobste.rs",
     feedUrl: "https://lobste.rs/rss",
-    description: "Comunidad técnica con foco en ingeniería de software.",
-    interests: ["java_spring", "devops", "ia", "seguridad"],
+    description: "Comunidad técnica con foco en software y arquitectura.",
+    topics: ["backend", "open-source", "devops", "seguridad"],
     relatedSourceIds: ["hn-front", "devops-com", "krebsonsecurity"]
   },
   {
@@ -36,8 +36,8 @@ export const SOURCES: SourceConfig[] = [
     name: "InfoQ Java",
     websiteUrl: "https://www.infoq.com/java/",
     feedUrl: "https://feed.infoq.com/java",
-    description: "Arquitectura, JVM y ecosistema Java.",
-    interests: ["java_spring"],
+    description: "Java enterprise, Spring y arquitectura backend.",
+    topics: ["java-spring", "backend", "cloud", "devops"],
     relatedSourceIds: ["spring-blog", "baeldung"]
   },
   {
@@ -45,8 +45,8 @@ export const SOURCES: SourceConfig[] = [
     name: "Spring Blog",
     websiteUrl: "https://spring.io/blog",
     feedUrl: "https://spring.io/blog.atom",
-    description: "Novedades oficiales de Spring Framework y Spring Boot.",
-    interests: ["java_spring"],
+    description: "Novedades oficiales de Spring Framework y Boot.",
+    topics: ["java-spring", "backend", "seguridad"],
     relatedSourceIds: ["infoq-java", "baeldung"]
   },
   {
@@ -54,8 +54,8 @@ export const SOURCES: SourceConfig[] = [
     name: "Baeldung",
     websiteUrl: "https://www.baeldung.com",
     feedUrl: "https://feeds.feedburner.com/Baeldung",
-    description: "Tutoriales prácticos de Java, Spring y backend.",
-    interests: ["java_spring"],
+    description: "Tutoriales prácticos de backend, Java y seguridad.",
+    topics: ["java-spring", "backend", "seguridad", "mobile"],
     relatedSourceIds: ["infoq-java", "spring-blog"]
   },
   {
@@ -63,8 +63,8 @@ export const SOURCES: SourceConfig[] = [
     name: "DevOps.com",
     websiteUrl: "https://devops.com",
     feedUrl: "https://devops.com/feed/",
-    description: "Prácticas DevOps, plataforma y entrega continua.",
-    interests: ["devops", "seguridad"],
+    description: "Artículos sobre CI/CD, cloud y plataforma.",
+    topics: ["devops", "cloud", "seguridad", "open-source"],
     relatedSourceIds: ["kubernetes-blog", "hn-front", "krebsonsecurity"]
   },
   {
@@ -72,8 +72,8 @@ export const SOURCES: SourceConfig[] = [
     name: "Kubernetes Blog",
     websiteUrl: "https://kubernetes.io/blog/",
     feedUrl: "https://kubernetes.io/feed.xml",
-    description: "Actualizaciones del ecosistema Kubernetes y cloud native.",
-    interests: ["devops", "seguridad"],
+    description: "Actualizaciones cloud-native y ecosistema Kubernetes.",
+    topics: ["cloud", "devops", "seguridad", "open-source"],
     relatedSourceIds: ["devops-com", "lobsters"]
   },
   {
@@ -81,8 +81,8 @@ export const SOURCES: SourceConfig[] = [
     name: "Towards Data Science",
     websiteUrl: "https://towardsdatascience.com",
     feedUrl: "https://towardsdatascience.com/feed",
-    description: "Artículos de IA, ML y data engineering.",
-    interests: ["ia"],
+    description: "Machine learning y aplicaciones de IA.",
+    topics: ["ia", "data", "backend"],
     relatedSourceIds: ["ml-mastery", "hn-front"]
   },
   {
@@ -90,8 +90,8 @@ export const SOURCES: SourceConfig[] = [
     name: "Machine Learning Mastery",
     websiteUrl: "https://machinelearningmastery.com",
     feedUrl: "https://machinelearningmastery.com/feed/",
-    description: "Guías técnicas de machine learning orientadas a práctica.",
-    interests: ["ia"],
+    description: "Guías prácticas de modelado y experimentación ML.",
+    topics: ["ia", "data"],
     relatedSourceIds: ["towards-data", "hn-front"]
   },
   {
@@ -99,34 +99,127 @@ export const SOURCES: SourceConfig[] = [
     name: "Krebs on Security",
     websiteUrl: "https://krebsonsecurity.com",
     feedUrl: "https://krebsonsecurity.com/feed/",
-    description: "Análisis de incidentes y tendencias de ciberseguridad.",
-    interests: ["seguridad"],
-    relatedSourceIds: ["the-hacker-news", "devops-com", "lobsters"]
+    description: "Investigación de ciberseguridad y amenazas reales.",
+    topics: ["seguridad", "ciberseguridad"],
+    relatedSourceIds: ["the-hacker-news", "devops-com"]
   },
   {
     id: "the-hacker-news",
     name: "The Hacker News",
     websiteUrl: "https://thehackernews.com",
     feedUrl: "https://feeds.feedburner.com/TheHackersNews",
-    description: "Alertas y noticias de seguridad ofensiva/defensiva.",
-    interests: ["seguridad"],
+    description: "Noticias rápidas de vulnerabilidades y seguridad.",
+    topics: ["seguridad", "ciberseguridad"],
     relatedSourceIds: ["krebsonsecurity", "devops-com"]
+  },
+  {
+    id: "anime-news-network",
+    name: "Anime News Network",
+    websiteUrl: "https://www.animenewsnetwork.com",
+    feedUrl: "https://www.animenewsnetwork.com/all/rss.xml",
+    description: "Noticias de anime, manga y lanzamientos.",
+    topics: ["anime", "manga", "cultura-pop"],
+    relatedSourceIds: ["myanimelist-news", "vidaextra"]
+  },
+  {
+    id: "myanimelist-news",
+    name: "MyAnimeList News",
+    websiteUrl: "https://myanimelist.net/news",
+    feedUrl: "https://myanimelist.net/rss/news.xml",
+    description: "Actualidad del ecosistema anime y manga.",
+    topics: ["anime", "manga"],
+    relatedSourceIds: ["anime-news-network"]
+  },
+  {
+    id: "vidaextra",
+    name: "VidaExtra",
+    websiteUrl: "https://www.vidaextra.com",
+    feedUrl: "https://www.vidaextra.com/index.xml",
+    description: "Videojuegos y cultura gamer en español.",
+    topics: ["videojuegos", "cultura-pop", "nintendo"],
+    relatedSourceIds: ["hobbyconsolas", "nintendolife", "gamesradar"]
+  },
+  {
+    id: "hobbyconsolas",
+    name: "HobbyConsolas",
+    websiteUrl: "https://www.hobbyconsolas.com",
+    feedUrl: "https://www.hobbyconsolas.com/rss",
+    description: "Videojuegos, cine, series y entretenimiento geek.",
+    topics: ["videojuegos", "cine", "series", "comics", "cultura-pop"],
+    relatedSourceIds: ["vidaextra", "gamesradar", "espinof"]
+  },
+  {
+    id: "gamesradar",
+    name: "GamesRadar",
+    websiteUrl: "https://www.gamesradar.com",
+    feedUrl: "https://www.gamesradar.com/feeds/all/",
+    description: "Gaming, cine y series con enfoque internacional.",
+    topics: ["videojuegos", "cine", "series", "comics"],
+    relatedSourceIds: ["hobbyconsolas", "nintendolife", "comingsoon"]
+  },
+  {
+    id: "nintendolife",
+    name: "Nintendo Life",
+    websiteUrl: "https://www.nintendolife.com",
+    feedUrl: "https://www.nintendolife.com/feeds/latest",
+    description: "Novedades de Nintendo Switch y franquicias clásicas.",
+    topics: ["nintendo", "videojuegos", "cultura-pop"],
+    relatedSourceIds: ["vidaextra", "gamesradar"]
+  },
+  {
+    id: "eurogamer",
+    name: "Eurogamer",
+    websiteUrl: "https://www.eurogamer.net",
+    feedUrl: "https://www.eurogamer.net/rss",
+    description: "Cobertura global de gaming, hardware y lanzamientos.",
+    topics: ["videojuegos", "cultura-pop"],
+    relatedSourceIds: ["gamesradar", "kotaku"]
+  },
+  {
+    id: "kotaku",
+    name: "Kotaku",
+    websiteUrl: "https://kotaku.com",
+    feedUrl: "https://kotaku.com/rss",
+    description: "Noticias y opinión de videojuegos y cultura internet.",
+    topics: ["videojuegos", "cultura-pop", "anime"],
+    relatedSourceIds: ["eurogamer", "gamesradar"]
+  },
+  {
+    id: "espinof",
+    name: "Espinof",
+    websiteUrl: "https://www.espinof.com",
+    feedUrl: "https://www.espinof.com/index.xml",
+    description: "Noticias de cine, series y streaming en español.",
+    topics: ["cine", "series", "cultura-pop"],
+    relatedSourceIds: ["comingsoon", "hobbyconsolas"]
+  },
+  {
+    id: "comingsoon",
+    name: "ComingSoon",
+    websiteUrl: "https://www.comingsoon.net",
+    feedUrl: "https://www.comingsoon.net/feed/",
+    description: "Trailers y novedades de cine, series y cómic.",
+    topics: ["cine", "series", "comics", "cultura-pop"],
+    relatedSourceIds: ["espinof", "gamesradar"]
   }
 ];
 
 export const DEFAULT_SOURCE_IDS: SourceId[] = [
   "hn-front",
-  "infoq-java",
   "devops-com",
   "towards-data",
-  "krebsonsecurity"
+  "krebsonsecurity",
+  "anime-news-network",
+  "vidaextra",
+  "espinof",
+  "gamesradar"
 ];
 
-const sourceMap = new Map(SOURCES.map((source) => [source.id, source]));
-const sourceIdSet = new Set(SOURCES.map((source) => source.id));
+const SOURCE_MAP = new Map(SOURCES.map((source) => [source.id, source]));
+const SOURCE_IDS = new Set(SOURCES.map((source) => source.id));
 
 export function isSourceId(value: string): value is SourceId {
-  return sourceIdSet.has(value);
+  return SOURCE_IDS.has(value);
 }
 
 export function sanitizeSourceIds(values: string[]): SourceId[] {
@@ -137,7 +230,7 @@ export function sanitizeSourceIds(values: string[]): SourceId[] {
 export function getSourcesByIds(sourceIds: SourceId[]): SourceConfig[] {
   const result: SourceConfig[] = [];
   for (const id of sourceIds) {
-    const source = sourceMap.get(id);
+    const source = SOURCE_MAP.get(id);
     if (source) {
       result.push(source);
     }
@@ -147,7 +240,7 @@ export function getSourcesByIds(sourceIds: SourceId[]): SourceConfig[] {
 
 type SuggestSourcesInput = {
   selectedSourceIds: SourceId[];
-  selectedInterests: InterestKey[];
+  selectedInterests: InterestDefinition[];
   limit?: number;
 };
 
@@ -155,30 +248,33 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
   const { selectedSourceIds, selectedInterests, limit = 4 } = input;
   const selectedSet = new Set(selectedSourceIds);
   const selectedSources = getSourcesByIds(selectedSourceIds);
-  const weights = new Map<InterestKey, number>();
-
-  for (const interest of selectedInterests) {
-    weights.set(interest, (weights.get(interest) ?? 0) + 4);
-  }
-
-  for (const source of selectedSources) {
-    for (const interest of source.interests) {
-      weights.set(interest, (weights.get(interest) ?? 0) + 2);
-    }
-  }
+  const selectedTokens = buildInterestTokens(selectedInterests);
 
   const scored = SOURCES.filter((source) => !selectedSet.has(source.id))
     .map((source) => {
       let score = 0;
+      const sourceTokens = new Set(source.topics.map(normalizeToken));
+      const sourceText = normalizeToken(`${source.name} ${source.description} ${source.topics.join(" ")}`);
 
-      for (const interest of source.interests) {
-        score += weights.get(interest) ?? 0;
+      for (const token of selectedTokens) {
+        if (sourceTokens.has(token)) {
+          score += 4;
+        } else if (token.length >= 4 && sourceText.includes(token)) {
+          score += 1;
+        }
       }
 
-      const relatedFromSelected = selectedSources.some((item) =>
-        item.relatedSourceIds.includes(source.id)
+      const overlapWithSelectedSources = selectedSources.some((selectedSource) =>
+        selectedSource.topics.some((topic) => sourceTokens.has(normalizeToken(topic)))
       );
-      const relatedToSelected = source.relatedSourceIds.some((id) => selectedSet.has(id));
+      if (overlapWithSelectedSources) {
+        score += 2;
+      }
+
+      const relatedFromSelected = selectedSources.some((sourceItem) =>
+        sourceItem.relatedSourceIds.includes(source.id)
+      );
+      const relatedToSelected = source.relatedSourceIds.some((sourceId) => selectedSet.has(sourceId));
       if (relatedFromSelected) {
         score += 6;
       }
@@ -195,8 +291,32 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
   }
 
   return scored
-    .sort((a, b) => b.score - a.score || a.source.name.localeCompare(b.source.name))
+    .sort((a, b) => b.score - a.score || a.source.name.localeCompare(b.source.name, "es"))
     .slice(0, limit)
     .map(({ source }) => source);
+}
+
+function buildInterestTokens(interests: InterestDefinition[]): Set<string> {
+  const tokens = new Set<string>();
+
+  for (const interest of interests) {
+    tokens.add(normalizeToken(interest.id));
+    tokens.add(normalizeToken(interest.label));
+
+    for (const keyword of interest.keywords) {
+      tokens.add(normalizeToken(keyword));
+    }
+  }
+
+  return tokens;
+}
+
+function normalizeToken(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 

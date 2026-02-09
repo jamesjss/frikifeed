@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { INTERESTS, isInterestKey, type InterestKey } from "@/lib/interests";
+import {
+  MAX_INTERESTS_PER_USER,
+  buildCustomInterest,
+  buildDefaultInterestCatalog,
+  buildDefaultSelectedInterestIds,
+  getInterestsByIds,
+  getSuggestedBuiltInInterests,
+  sanitizeInterestCatalog,
+  sanitizeInterestSelection,
+  sanitizeSelectedInterestIds,
+  sortInterestCatalog,
+  updateInterestDraft,
+  type InterestDefinition
+} from "@/lib/interests";
 import {
   DEFAULT_SOURCE_IDS,
   SOURCES,
@@ -11,6 +24,7 @@ import {
 } from "@/lib/sources";
 
 const STORAGE_KEY = "frikifeed:preferences";
+const STORAGE_VERSION = 2;
 
 type SourcePayload = {
   id: SourceId;
@@ -21,13 +35,14 @@ type SourcePayload = {
 
 type SummaryResponse = {
   generatedAt: string;
-  interests: Array<{ key: InterestKey; label: string }>;
+  interests: InterestDefinition[];
   sources: SourcePayload[];
   suggestedSources: SourcePayload[];
   email: string | null;
   limits: {
     maxItemsPerSource: number;
     maxTotalItems: number;
+    maxKeywordsPerInterest: number;
   };
   stats: {
     totalCandidates: number;
@@ -43,7 +58,7 @@ type SummaryResponse = {
     publishedAt: string | null;
     summary: string;
     matchedKeywords: string[];
-    matchedInterests: InterestKey[];
+    matchedInterests: Array<{ id: string; label: string }>;
   }>;
 };
 
@@ -51,53 +66,106 @@ type ErrorResponse = {
   error?: string;
 };
 
-type StoredPreferences = {
+type StoredPreferencesV2 = {
+  version: 2;
   email: string;
-  interests: InterestKey[];
   sources: SourceId[];
+  selectedInterestIds: string[];
+  interestCatalog: InterestDefinition[];
 };
 
-const interestOptions = Object.entries(INTERESTS).map(([key, config]) => ({
-  key: key as InterestKey,
-  label: config.label
-}));
+type LegacyStoredPreferences = {
+  email?: string;
+  interests?: string[];
+  sources?: string[];
+};
 
 export default function HomePage() {
-  const [selectedInterests, setSelectedInterests] = useState<InterestKey[]>([]);
+  const [interestCatalog, setInterestCatalog] = useState<InterestDefinition[]>(() =>
+    buildDefaultInterestCatalog()
+  );
+  const [selectedInterestIds, setSelectedInterestIds] = useState<string[]>(() =>
+    buildDefaultSelectedInterestIds(buildDefaultInterestCatalog())
+  );
   const [selectedSources, setSelectedSources] = useState<SourceId[]>(DEFAULT_SOURCE_IDS);
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [isInterestModalOpen, setIsInterestModalOpen] = useState(false);
+  const [managerError, setManagerError] = useState<string | null>(null);
+  const [newInterestLabel, setNewInterestLabel] = useState("");
+  const [newInterestKeywords, setNewInterestKeywords] = useState("");
+  const [editingInterestId, setEditingInterestId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState("");
+  const [editKeywords, setEditKeywords] = useState("");
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       return;
     }
-    try {
-      const stored = JSON.parse(raw) as StoredPreferences;
-      const validInterests = sanitizeStoredInterests(stored.interests);
-      const validSources = sanitizeStoredSources(stored.sources);
 
-      setEmail(stored.email ?? "");
-      setSelectedInterests(validInterests);
-      setSelectedSources(validSources.length > 0 ? validSources : DEFAULT_SOURCE_IDS);
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+
+      if (isStoredPreferencesV2(parsed)) {
+        const sanitizedCatalog = sanitizeInterestCatalog(parsed.interestCatalog);
+        const catalog = sanitizedCatalog.length > 0 ? sanitizedCatalog : buildDefaultInterestCatalog();
+        const selected = sanitizeSelectedInterestIds(parsed.selectedInterestIds, catalog);
+        const safeEmail = typeof parsed.email === "string" ? parsed.email : "";
+        const safeSources = sanitizeStoredSources(parsed.sources);
+
+        setInterestCatalog(catalog);
+        setSelectedInterestIds(
+          selected.length > 0 ? selected : buildDefaultSelectedInterestIds(catalog)
+        );
+        setSelectedSources(safeSources.length > 0 ? safeSources : DEFAULT_SOURCE_IDS);
+        setEmail(safeEmail);
+        return;
+      }
+
+      const legacy = parsed as LegacyStoredPreferences;
+      const catalog = buildDefaultInterestCatalog();
+      const selectedFromLegacy = sanitizeInterestSelection(legacy.interests ?? []).map(
+        (interest) => interest.id
+      );
+      const selected = sanitizeSelectedInterestIds(selectedFromLegacy, catalog);
+      const safeSources = sanitizeStoredSources(legacy.sources);
+      const safeEmail = typeof legacy.email === "string" ? legacy.email : "";
+
+      setInterestCatalog(catalog);
+      setSelectedInterestIds(selected.length > 0 ? selected : buildDefaultSelectedInterestIds(catalog));
+      setSelectedSources(safeSources.length > 0 ? safeSources : DEFAULT_SOURCE_IDS);
+      setEmail(safeEmail);
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     }
   }, []);
 
   useEffect(() => {
-    const payload: StoredPreferences = {
+    const payload: StoredPreferencesV2 = {
+      version: STORAGE_VERSION,
       email,
-      interests: selectedInterests,
-      sources: selectedSources
+      sources: selectedSources,
+      selectedInterestIds: sanitizeSelectedInterestIds(selectedInterestIds, interestCatalog),
+      interestCatalog
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [email, selectedInterests, selectedSources]);
+  }, [email, selectedSources, selectedInterestIds, interestCatalog]);
 
-  const canGenerate = selectedInterests.length > 0 && selectedSources.length > 0 && !isLoading;
+  useEffect(() => {
+    setSelectedInterestIds((prev) => {
+      const next = sanitizeSelectedInterestIds(prev, interestCatalog);
+      return sameStringArray(prev, next) ? prev : next;
+    });
+  }, [interestCatalog]);
+
+  const selectedInterests = useMemo(
+    () => getInterestsByIds(selectedInterestIds, interestCatalog),
+    [selectedInterestIds, interestCatalog]
+  );
+
   const sourceSuggestions = useMemo(
     () =>
       suggestSources({
@@ -105,8 +173,15 @@ export default function HomePage() {
         selectedInterests,
         limit: 4
       }),
-    [selectedInterests, selectedSources]
+    [selectedSources, selectedInterests]
   );
+
+  const interestSuggestions = useMemo(
+    () => getSuggestedBuiltInInterests(interestCatalog, 8),
+    [interestCatalog]
+  );
+
+  const canGenerate = selectedInterests.length > 0 && selectedSources.length > 0 && !isLoading;
 
   async function handleGenerate() {
     setIsLoading(true);
@@ -140,15 +215,15 @@ export default function HomePage() {
     }
   }
 
-  function toggleInterest(interest: InterestKey) {
-    setSelectedInterests((prev) =>
-      prev.includes(interest) ? prev.filter((item) => item !== interest) : [...prev, interest]
+  function toggleInterest(interestId: string) {
+    setSelectedInterestIds((prev) =>
+      prev.includes(interestId) ? prev.filter((id) => id !== interestId) : [...prev, interestId]
     );
   }
 
   function toggleSource(sourceId: SourceId) {
     setSelectedSources((prev) =>
-      prev.includes(sourceId) ? prev.filter((item) => item !== sourceId) : [...prev, sourceId]
+      prev.includes(sourceId) ? prev.filter((id) => id !== sourceId) : [...prev, sourceId]
     );
   }
 
@@ -159,6 +234,106 @@ export default function HomePage() {
 
   function addOneSource(sourceId: SourceId) {
     setSelectedSources((prev) => mergeSourceIds(prev, [sourceId]));
+  }
+
+  function createInterest() {
+    setManagerError(null);
+    if (interestCatalog.length >= MAX_INTERESTS_PER_USER) {
+      setManagerError(`Has llegado al máximo de ${MAX_INTERESTS_PER_USER} intereses.`);
+      return;
+    }
+
+    const result = buildCustomInterest({
+      label: newInterestLabel,
+      keywordsInput: newInterestKeywords,
+      existingCatalog: interestCatalog
+    });
+
+    if (!result.interest) {
+      setManagerError(result.error ?? "No se pudo crear el interés.");
+      return;
+    }
+
+    setInterestCatalog((prev) => sortInterestCatalog([...prev, result.interest!]));
+    setSelectedInterestIds((prev) => [...prev, result.interest!.id]);
+    setNewInterestLabel("");
+    setNewInterestKeywords("");
+  }
+
+  function startEditInterest(interestId: string) {
+    const interest = interestCatalog.find((item) => item.id === interestId);
+    if (!interest) {
+      return;
+    }
+    setManagerError(null);
+    setEditingInterestId(interest.id);
+    setEditLabel(interest.label);
+    setEditKeywords(interest.keywords.join(", "));
+  }
+
+  function cancelEditInterest() {
+    setEditingInterestId(null);
+    setEditLabel("");
+    setEditKeywords("");
+  }
+
+  function saveEditInterest() {
+    if (!editingInterestId) {
+      return;
+    }
+    const current = interestCatalog.find((interest) => interest.id === editingInterestId);
+    if (!current) {
+      return;
+    }
+
+    const result = updateInterestDraft(current, {
+      label: editLabel,
+      keywordsInput: editKeywords
+    });
+
+    if (!result.interest) {
+      setManagerError(result.error ?? "No se pudo guardar el interés.");
+      return;
+    }
+
+    setManagerError(null);
+    setInterestCatalog((prev) =>
+      sortInterestCatalog(prev.map((interest) => (interest.id === current.id ? result.interest! : interest)))
+    );
+    cancelEditInterest();
+  }
+
+  function removeInterest(interestId: string) {
+    const interest = interestCatalog.find((item) => item.id === interestId);
+    if (!interest) {
+      return;
+    }
+
+    const shouldConfirm = window.confirm(
+      selectedInterestIds.includes(interestId)
+        ? `¿Eliminar "${interest.label}" del catálogo? También se desactivará en la selección actual.`
+        : `¿Eliminar "${interest.label}" del catálogo?`
+    );
+    if (!shouldConfirm) {
+      return;
+    }
+
+    setManagerError(null);
+    setInterestCatalog((prev) => prev.filter((item) => item.id !== interestId));
+    setSelectedInterestIds((prev) => prev.filter((id) => id !== interestId));
+    if (editingInterestId === interestId) {
+      cancelEditInterest();
+    }
+  }
+
+  function addSuggestedInterest(interestId: string) {
+    const suggested = interestSuggestions.find((interest) => interest.id === interestId);
+    if (!suggested) {
+      return;
+    }
+
+    setManagerError(null);
+    setInterestCatalog((prev) => sortInterestCatalog([...prev, suggested]));
   }
 
   const generatedDate = useMemo(() => {
@@ -174,29 +349,39 @@ export default function HomePage() {
       <section className="hero">
         <h1>Alertas Tech Personales</h1>
         <p>
-          Elige intereses y genera un resumen tech al instante con RSS + filtro por keywords + mini
-          resumen.
+          Elige intereses y fuentes para generar un resumen RSS friki+tech con keywords dinámicas.
         </p>
       </section>
 
       <section className="panel">
-        <h2 className="section-title">Intereses</h2>
+        <div className="section-head">
+          <h2 className="section-title">Intereses</h2>
+          <button type="button" className="button-secondary" onClick={() => setIsInterestModalOpen(true)}>
+            Gestionar intereses
+          </button>
+        </div>
         <div className="grid">
-          {interestOptions.map((option) => (
-            <label className="interest" key={option.key}>
+          {interestCatalog.map((interest) => (
+            <label className="interest" key={interest.id}>
               <input
                 type="checkbox"
-                checked={selectedInterests.includes(option.key)}
-                onChange={() => toggleInterest(option.key)}
+                checked={selectedInterestIds.includes(interest.id)}
+                onChange={() => toggleInterest(interest.id)}
               />
-              <span>{option.label}</span>
+              <span>
+                <strong>{interest.label}</strong>
+                <br />
+                <span className="small">
+                  {formatInterestCategory(interest.category)} · {interest.keywords.length} keywords
+                </span>
+              </span>
             </label>
           ))}
         </div>
 
         <h2 className="section-title">Fuentes Web (RSS)</h2>
         <p className="small">
-          Elige desde qué páginas quieres sacar contenido. Puedes combinar varias.
+          Elige desde qué páginas quieres sacar contenido. Puedes combinar tech y friki.
         </p>
         <div className="source-grid">
           {SOURCES.map((source) => (
@@ -229,13 +414,13 @@ export default function HomePage() {
               Agregar sugeridas
             </button>
           </div>
-          <p className="small">Basadas en tus intereses y en las fuentes que ya seleccionaste.</p>
+          <p className="small">Basadas en tus intereses activos y en las fuentes ya seleccionadas.</p>
           <div className="suggestion-list">
             {sourceSuggestions.map((source) => (
               <button
                 type="button"
                 className="suggestion-chip"
-                key={`suggest-${source.id}`}
+                key={`suggest-source-${source.id}`}
                 onClick={() => addOneSource(source.id)}
               >
                 + {source.name}
@@ -266,7 +451,11 @@ export default function HomePage() {
           </span>
         </div>
 
-        {error ? <p className="small" style={{ color: "#b42318" }}>{error}</p> : null}
+        {error ? (
+          <p className="small" style={{ color: "#b42318" }}>
+            {error}
+          </p>
+        ) : null}
 
         {summary?.warnings.length ? (
           <div className="warning-list">
@@ -290,9 +479,8 @@ export default function HomePage() {
               {generatedDate ? <span className="success">Generado: {generatedDate}</span> : null}
               <br />
               <span>
-                Fuentes usadas: {summary.sources.length} |{" "}
-                Candidatos: {summary.stats.totalCandidates} | Límite total:{" "}
-                {summary.limits.maxTotalItems}
+                Fuentes usadas: {summary.sources.length} | Candidatos: {summary.stats.totalCandidates} |
+                Límite total: {summary.limits.maxTotalItems}
               </span>
             </div>
           </section>
@@ -300,7 +488,8 @@ export default function HomePage() {
           <section className="cards">
             {summary.items.length === 0 ? (
               <p className="small">
-                No hubo coincidencias para las keywords actuales. Prueba con otros intereses.
+                No hubo coincidencias para las keywords actuales. Ajusta intereses o añade nuevas
+                keywords.
               </p>
             ) : (
               summary.items.map((item) => (
@@ -317,8 +506,8 @@ export default function HomePage() {
                   <p>{item.summary}</p>
                   <div className="tags">
                     {item.matchedInterests.map((interest) => (
-                      <span className="tag" key={`${item.id}-${interest}`}>
-                        {INTERESTS[interest].label}
+                      <span className="tag" key={`${item.id}-${interest.id}`}>
+                        {interest.label}
                       </span>
                     ))}
                   </div>
@@ -346,27 +535,166 @@ export default function HomePage() {
           ) : null}
         </>
       ) : null}
+
+      {isInterestModalOpen ? (
+        <div className="modal-backdrop" onClick={() => setIsInterestModalOpen(false)}>
+          <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Gestor de intereses</h2>
+              <button type="button" className="button-secondary" onClick={() => setIsInterestModalOpen(false)}>
+                Cerrar
+              </button>
+            </div>
+
+            <p className="small">
+              Crea, edita, elimina y recupera intereses. Máximo {MAX_INTERESTS_PER_USER} intereses.
+            </p>
+
+            {managerError ? (
+              <p className="small" style={{ color: "#b42318" }}>
+                {managerError}
+              </p>
+            ) : null}
+
+            <div className="modal-section">
+              <h3>Tu catálogo ({interestCatalog.length}/{MAX_INTERESTS_PER_USER})</h3>
+              <div className="manage-list">
+                {interestCatalog.map((interest) =>
+                  editingInterestId === interest.id ? (
+                    <div className="manage-item editing" key={`edit-${interest.id}`}>
+                      <div className="manage-main">
+                        <input
+                          className="modal-input"
+                          value={editLabel}
+                          onChange={(event) => setEditLabel(event.target.value)}
+                          placeholder="Nombre del interés"
+                        />
+                        <input
+                          className="modal-input"
+                          value={editKeywords}
+                          onChange={(event) => setEditKeywords(event.target.value)}
+                          placeholder="keywords separadas por coma"
+                        />
+                      </div>
+                      <div className="manage-actions">
+                        <button type="button" className="button-secondary" onClick={saveEditInterest}>
+                          Guardar
+                        </button>
+                        <button type="button" className="button-secondary" onClick={cancelEditInterest}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="manage-item" key={interest.id}>
+                      <div className="manage-main">
+                        <strong>{interest.label}</strong>
+                        <span className="small">
+                          {formatInterestCategory(interest.category)} · {interest.keywords.length} keywords
+                          {interest.isBuiltIn ? " · base" : " · custom"}
+                        </span>
+                        <span className="small">{interest.keywords.join(", ")}</span>
+                      </div>
+                      <div className="manage-actions">
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => startEditInterest(interest.id)}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => removeInterest(interest.id)}
+                        >
+                          {interest.isBuiltIn ? "Quitar" : "Eliminar"}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+
+            <div className="modal-section">
+              <h3>Crear interés personalizado</h3>
+              <div className="modal-form">
+                <input
+                  className="modal-input"
+                  value={newInterestLabel}
+                  onChange={(event) => setNewInterestLabel(event.target.value)}
+                  placeholder="Nombre (ej: Warhammer)"
+                />
+                <input
+                  className="modal-input"
+                  value={newInterestKeywords}
+                  onChange={(event) => setNewInterestKeywords(event.target.value)}
+                  placeholder="keywords (ej: warhammer, 40k, space marine)"
+                />
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={createInterest}
+                  disabled={interestCatalog.length >= MAX_INTERESTS_PER_USER}
+                >
+                  Crear interés
+                </button>
+              </div>
+            </div>
+
+            <div className="modal-section">
+              <h3>Intereses sugeridos no instalados</h3>
+              {interestSuggestions.length === 0 ? (
+                <p className="small">Ya tienes todos los intereses base disponibles.</p>
+              ) : (
+                <div className="suggestion-list">
+                  {interestSuggestions.map((interest) => (
+                    <button
+                      type="button"
+                      className="suggestion-chip"
+                      key={`suggest-interest-${interest.id}`}
+                      onClick={() => addSuggestedInterest(interest.id)}
+                    >
+                      + {interest.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function sanitizeStoredInterests(values: unknown): InterestKey[] {
-  if (!Array.isArray(values)) {
-    return [];
+function formatInterestCategory(category: InterestDefinition["category"]): string {
+  if (category === "tech") {
+    return "Tech";
   }
-  return values.filter((value): value is InterestKey => typeof value === "string" && isInterestKey(value));
+  if (category === "friki") {
+    return "Friki";
+  }
+  return "Custom";
 }
 
 function sanitizeStoredSources(values: unknown): SourceId[] {
   if (!Array.isArray(values)) {
     return [];
   }
-  return values.filter((value): value is SourceId => typeof value === "string" && isSourceId(value));
+  const set = new Set<SourceId>();
+  for (const value of values) {
+    if (typeof value === "string" && isSourceId(value)) {
+      set.add(value);
+    }
+  }
+  return Array.from(set);
 }
 
 function mergeSourceIds(base: SourceId[], incoming: SourceId[]): SourceId[] {
   const set = new Set([...base, ...incoming]);
-  return SOURCES.map((source) => source.id).filter((id) => set.has(id));
+  return SOURCES.map((source) => source.id).filter((id): id is SourceId => set.has(id));
 }
 
 function toDomain(url: string): string {
@@ -377,3 +705,18 @@ function toDomain(url: string): string {
     return url;
   }
 }
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+}
+
+function isStoredPreferencesV2(value: unknown): value is StoredPreferencesV2 {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  return (value as StoredPreferencesV2).version === STORAGE_VERSION;
+}
+

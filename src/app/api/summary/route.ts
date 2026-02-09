@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSummary, MAX_ITEMS_PER_SOURCE, MAX_TOTAL_ITEMS } from "@/lib/rss-pipeline";
-import { INTERESTS, isInterestKey, type InterestKey } from "@/lib/interests";
+import {
+  MAX_KEYWORDS_PER_INTEREST,
+  sanitizeInterestSelection,
+  type InterestDefinition
+} from "@/lib/interests";
 import {
   getSourcesByIds,
   sanitizeSourceIds,
@@ -11,7 +15,7 @@ import {
 export const runtime = "nodejs";
 
 type RequestBody = {
-  interests?: string[];
+  interests?: unknown;
   sources?: string[];
   email?: string;
 };
@@ -24,9 +28,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Body JSON inválido" }, { status: 400 });
   }
 
-  const interests = sanitizeInterests(body.interests ?? []);
+  const interests = sanitizeInterests(body.interests);
   if (interests.length === 0) {
-    return NextResponse.json({ error: "Debes elegir al menos un interés." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Debes elegir al menos un interés válido con keywords." },
+      { status: 400 }
+    );
   }
 
   const sources = sanitizeSources(body.sources ?? []);
@@ -45,7 +52,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
-    interests: interests.map((key) => ({ key, label: INTERESTS[key].label })),
+    interests,
     sources: sourceConfigs.map((source) => ({
       id: source.id,
       name: source.name,
@@ -61,7 +68,8 @@ export async function POST(request: NextRequest) {
     email: sanitizeEmail(body.email),
     limits: {
       maxItemsPerSource: MAX_ITEMS_PER_SOURCE,
-      maxTotalItems: MAX_TOTAL_ITEMS
+      maxTotalItems: MAX_TOTAL_ITEMS,
+      maxKeywordsPerInterest: MAX_KEYWORDS_PER_INTEREST
     },
     stats: {
       totalCandidates: result.totalCandidates,
@@ -72,9 +80,8 @@ export async function POST(request: NextRequest) {
   });
 }
 
-function sanitizeInterests(values: string[]): InterestKey[] {
-  const deduped = Array.from(new Set(values));
-  return deduped.filter((value): value is InterestKey => isInterestKey(value));
+function sanitizeInterests(values: unknown): InterestDefinition[] {
+  return sanitizeInterestSelection(values);
 }
 
 function sanitizeSources(values: string[]): SourceId[] {
@@ -88,3 +95,4 @@ function sanitizeEmail(email?: string): string | null {
   const trimmed = email.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
+

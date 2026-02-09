@@ -1,26 +1,28 @@
-# Alertas Tech Personales (Fase 1 MVP)
+# Alertas Tech Personales (MVP dinámico Friki + Tech)
 
-MVP de una tarde: eliges intereses, pulsas `Generar resumen` y recibes links con mini-resúmenes filtrados.
+MVP: eliges intereses y fuentes, pulsas `Generar resumen` y recibes links con mini-resúmenes filtrados.
 
 ## Qué incluye esta fase
 
 - Frontend en Next.js (App Router).
-- Intereses con checkboxes:
-  - Java / Spring
-  - DevOps
-  - IA
-  - Seguridad
-- Fuentes web seleccionables (sitios RSS).
-- Sugerencias automáticas de nuevas fuentes según:
-  - tus intereses,
-  - las fuentes que ya seleccionaste.
-- Preferencias guardadas en `localStorage` (modo demo sin login ni BD).
-- API `POST /api/summary` que:
-  - consume solo las fuentes RSS que selecciones,
-  - normaliza y deduplica items por URL/guid,
-  - filtra por keywords de intereses,
-  - aplica límites por fuente y total,
-  - genera mini-resumen heurístico por item.
+- Intereses dinámicos (`tech`, `friki`, `custom`) con:
+  - selección en pantalla principal,
+  - gestor en modal para crear/editar/eliminar,
+  - sugerencias de intereses base no instalados.
+- Fuentes RSS seleccionables (mezcla ES+EN) en temática tech + friki.
+- Sugerencias automáticas de fuentes según:
+  - intereses activos (keywords dinámicas),
+  - fuentes ya seleccionadas.
+- Preferencias guardadas en `localStorage` sin login ni BD.
+- Migración automática de formato legacy de preferencias a `v2`.
+- API `POST /api/summary` con soporte dual:
+  - legacy: `interests: string[]`,
+  - nuevo: `interests: InterestDefinition[]`.
+- Pipeline RSS con:
+  - parse + normalización + deduplicación,
+  - filtro por keywords dinámicas,
+  - límites por fuente y total,
+  - mini-resumen heurístico.
 - Caché en memoria con TTL para evitar consultar RSS en cada click.
 
 ## Ejecución local
@@ -30,28 +32,30 @@ npm install
 npm run dev
 ```
 
-Abrir [http://localhost:3000](http://localhost:3000).
+Abrir [http://localhost:3000](http://localhost:3000) (o el puerto libre que asigne Next.js).
 
 ## Estructura principal
 
 - `src/app/page.tsx`: UI del MVP.
 - `src/app/api/summary/route.ts`: endpoint para generar resumen.
-- `src/lib/interests.ts`: definición de intereses + keywords.
-- `src/lib/sources.ts`: catálogo de fuentes + motor de sugerencias.
-- `src/lib/rss-pipeline.ts`: pipeline RSS (parse, dedupe, filtro, resumen, caché).
+- `src/lib/interests.ts`: modelo dinámico de intereses + defaults + migración + sanitización.
+- `src/lib/sources.ts`: catálogo de fuentes tech/friki + motor de sugerencias.
+- `src/lib/rss-pipeline.ts`: pipeline RSS (parse, dedupe, filtro dinámico, resumen, caché).
 
 ## Límites actuales
 
 - Máximo por fuente: `20`.
 - Máximo total devuelto: `50`.
 - TTL de caché: `10 min`.
+- Máximo de intereses por usuario: `30`.
+- Máximo de keywords por interés: `12`.
 
-## Siguiente paso (Fase 2)
+## Próximo paso (Fase 2)
 
-- Pasar preferencias a BD (usuario o email).
+- Persistir preferencias en BD (usuario/email).
 - Workflow diario/semanal con n8n:
-  - cargar intereses,
-  - consultar feeds,
+  - cargar intereses guardados,
+  - consultar feeds por usuario,
   - resumir con LLM,
   - enviar por email/Telegram.
 - Cache persistente (Redis/KV) y tracking de items ya enviados.
