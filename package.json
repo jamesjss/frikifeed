@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test --import ./scripts/register-ts-test-loader.mjs \"src/**/*.test.ts\""
   },
   "dependencies": {
     "next": "^14.2.5",
@@ -23,4 +24,3 @@
     "typescript": "^5.5.3"
   }
 }
-

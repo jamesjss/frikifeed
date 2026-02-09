@@ -249,6 +249,8 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
   const selectedSet = new Set(selectedSourceIds);
   const selectedSources = getSourcesByIds(selectedSourceIds);
   const selectedTokens = buildInterestTokens(selectedInterests);
+  const selectedTopicTokens = buildSelectedTopicTokens(selectedSources);
+  const relatedSourceIds = buildRelatedSourceIds(selectedSources);
 
   const scored = SOURCES.filter((source) => !selectedSet.has(source.id))
     .map((source) => {
@@ -264,16 +266,11 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
         }
       }
 
-      const overlapWithSelectedSources = selectedSources.some((selectedSource) =>
-        selectedSource.topics.some((topic) => sourceTokens.has(normalizeToken(topic)))
-      );
-      if (overlapWithSelectedSources) {
+      if (hasTokenOverlap(sourceTokens, selectedTopicTokens)) {
         score += 2;
       }
 
-      const relatedFromSelected = selectedSources.some((sourceItem) =>
-        sourceItem.relatedSourceIds.includes(source.id)
-      );
+      const relatedFromSelected = relatedSourceIds.has(source.id);
       const relatedToSelected = source.relatedSourceIds.some((sourceId) => selectedSet.has(sourceId));
       if (relatedFromSelected) {
         score += 6;
@@ -320,3 +317,31 @@ function normalizeToken(value: string): string {
     .trim();
 }
 
+function buildSelectedTopicTokens(selectedSources: SourceConfig[]): Set<string> {
+  const tokens = new Set<string>();
+  for (const source of selectedSources) {
+    for (const topic of source.topics) {
+      tokens.add(normalizeToken(topic));
+    }
+  }
+  return tokens;
+}
+
+function buildRelatedSourceIds(selectedSources: SourceConfig[]): Set<string> {
+  const relatedIds = new Set<string>();
+  for (const source of selectedSources) {
+    for (const relatedId of source.relatedSourceIds) {
+      relatedIds.add(relatedId);
+    }
+  }
+  return relatedIds;
+}
+
+function hasTokenOverlap(base: Set<string>, incoming: Set<string>): boolean {
+  for (const token of base) {
+    if (incoming.has(token)) {
+      return true;
+    }
+  }
+  return false;
+}

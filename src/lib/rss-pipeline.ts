@@ -33,6 +33,12 @@ type MatchedInterest = {
   label: string;
 };
 
+type InterestMatcher = {
+  id: string;
+  label: string;
+  keywords: string[];
+};
+
 export type SummaryItem = {
   id: string;
   title: string;
@@ -73,7 +79,8 @@ export async function buildSummary(
   selectedInterests: InterestDefinition[],
   selectedSourceIds: SourceId[]
 ): Promise<SummaryResult> {
-  const selectedKeywords = getSelectedKeywords(selectedInterests);
+  const selectedKeywords = Array.from(getSelectedKeywords(selectedInterests));
+  const interestMatchers = buildInterestMatchers(selectedInterests);
   const warnings: string[] = [];
   const selectedSources = selectedSourceIds.length > 0 ? getSourcesByIds(selectedSourceIds) : SOURCES;
 
@@ -91,7 +98,7 @@ export async function buildSummary(
 
   const dedupedItems = dedupeItems(perFeedResults.flat());
   const scoredItems = dedupedItems
-    .map((item) => scoreItem(item, selectedInterests, selectedKeywords))
+    .map((item) => scoreItem(item, interestMatchers, selectedKeywords))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || compareDates(b.publishedAt, a.publishedAt))
     .slice(0, MAX_TOTAL_ITEMS);
@@ -193,16 +200,33 @@ function getSelectedKeywords(interests: InterestDefinition[]): Set<string> {
   return keywords;
 }
 
+function buildInterestMatchers(interests: InterestDefinition[]): InterestMatcher[] {
+  return interests.map((interest) => ({
+    id: interest.id,
+    label: interest.label,
+    keywords: interest.keywords.map((keyword) => keyword.toLowerCase().trim()).filter(Boolean)
+  }));
+}
+
 function scoreItem(
   item: NormalizedItem,
-  selectedInterests: InterestDefinition[],
-  selectedKeywords: Set<string>
+  interestMatchers: InterestMatcher[],
+  selectedKeywords: string[]
 ) {
   const haystack = `${item.title} ${item.text}`.toLowerCase();
-  const matchedKeywords = Array.from(selectedKeywords).filter((keyword) => haystack.includes(keyword));
-  const matchedInterests = selectedInterests
-    .filter((interest) => interest.keywords.some((keyword) => haystack.includes(keyword.toLowerCase())))
-    .map((interest) => ({ id: interest.id, label: interest.label }));
+  const matchedKeywords: string[] = [];
+  for (const keyword of selectedKeywords) {
+    if (haystack.includes(keyword)) {
+      matchedKeywords.push(keyword);
+    }
+  }
+
+  const matchedInterests: MatchedInterest[] = [];
+  for (const interest of interestMatchers) {
+    if (interest.keywords.some((keyword) => haystack.includes(keyword))) {
+      matchedInterests.push({ id: interest.id, label: interest.label });
+    }
+  }
 
   const score = matchedKeywords.length + matchedInterests.length * 2;
   return {
@@ -296,3 +320,9 @@ function toStringValue(value: unknown): string {
   }
   return String(value);
 }
+
+export const __rssPipelineTestables = {
+  getSelectedKeywords,
+  buildInterestMatchers,
+  scoreItem
+};

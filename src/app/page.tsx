@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { memo, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
-  MAX_INTERESTS_PER_USER,
-  buildCustomInterest,
   buildDefaultInterestCatalog,
   buildDefaultSelectedInterestIds,
   getInterestsByIds,
@@ -11,8 +10,6 @@ import {
   sanitizeInterestCatalog,
   sanitizeInterestSelection,
   sanitizeSelectedInterestIds,
-  sortInterestCatalog,
-  updateInterestDraft,
   type InterestDefinition
 } from "@/lib/interests";
 import {
@@ -20,11 +17,13 @@ import {
   SOURCES,
   isSourceId,
   suggestSources,
+  type SourceConfig,
   type SourceId
 } from "@/lib/sources";
 
 const STORAGE_KEY = "frikifeed:preferences";
 const STORAGE_VERSION = 2;
+const InterestManagerModal = dynamic(() => import("@/components/interest-manager-modal"));
 
 type SourcePayload = {
   id: SourceId;
@@ -80,12 +79,35 @@ type LegacyStoredPreferences = {
   sources?: string[];
 };
 
+type InterestsSectionProps = {
+  interestCatalog: InterestDefinition[];
+  selectedInterestIds: string[];
+  onToggleInterest: (interestId: string) => void;
+  onOpenManager: () => void;
+};
+
+type SourcesSectionProps = {
+  selectedSources: SourceId[];
+  sourceSuggestions: SourceConfig[];
+  email: string;
+  onToggleSource: (sourceId: SourceId) => void;
+  onApplySuggestedSources: () => void;
+  onAddOneSource: (sourceId: SourceId) => void;
+  onEmailChange: (event: ChangeEvent<HTMLInputElement>) => void;
+};
+
+type SummaryResultsSectionProps = {
+  summary: SummaryResponse;
+  generatedDate: string | null;
+  onAddOneSource: (sourceId: SourceId) => void;
+};
+
 export default function HomePage() {
   const [interestCatalog, setInterestCatalog] = useState<InterestDefinition[]>(() =>
     buildDefaultInterestCatalog()
   );
   const [selectedInterestIds, setSelectedInterestIds] = useState<string[]>(() =>
-    buildDefaultSelectedInterestIds(buildDefaultInterestCatalog())
+    buildDefaultSelectedInterestIds()
   );
   const [selectedSources, setSelectedSources] = useState<SourceId[]>(DEFAULT_SOURCE_IDS);
   const [email, setEmail] = useState("");
@@ -93,12 +115,6 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [isInterestModalOpen, setIsInterestModalOpen] = useState(false);
-  const [managerError, setManagerError] = useState<string | null>(null);
-  const [newInterestLabel, setNewInterestLabel] = useState("");
-  const [newInterestKeywords, setNewInterestKeywords] = useState("");
-  const [editingInterestId, setEditingInterestId] = useState<string | null>(null);
-  const [editLabel, setEditLabel] = useState("");
-  const [editKeywords, setEditKeywords] = useState("");
 
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -183,7 +199,7 @@ export default function HomePage() {
 
   const canGenerate = selectedInterests.length > 0 && selectedSources.length > 0 && !isLoading;
 
-  async function handleGenerate() {
+  const handleGenerate = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
@@ -213,128 +229,40 @@ export default function HomePage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [email, selectedInterests, selectedSources]);
 
-  function toggleInterest(interestId: string) {
+  const toggleInterest = useCallback((interestId: string) => {
     setSelectedInterestIds((prev) =>
       prev.includes(interestId) ? prev.filter((id) => id !== interestId) : [...prev, interestId]
     );
-  }
+  }, []);
 
-  function toggleSource(sourceId: SourceId) {
+  const toggleSource = useCallback((sourceId: SourceId) => {
     setSelectedSources((prev) =>
       prev.includes(sourceId) ? prev.filter((id) => id !== sourceId) : [...prev, sourceId]
     );
-  }
+  }, []);
 
-  function applySuggestedSources() {
+  const applySuggestedSources = useCallback(() => {
     const suggestedIds = sourceSuggestions.map((source) => source.id);
     setSelectedSources((prev) => mergeSourceIds(prev, suggestedIds));
-  }
+  }, [sourceSuggestions]);
 
-  function addOneSource(sourceId: SourceId) {
+  const addOneSource = useCallback((sourceId: SourceId) => {
     setSelectedSources((prev) => mergeSourceIds(prev, [sourceId]));
-  }
+  }, []);
 
-  function createInterest() {
-    setManagerError(null);
-    if (interestCatalog.length >= MAX_INTERESTS_PER_USER) {
-      setManagerError(`Has llegado al máximo de ${MAX_INTERESTS_PER_USER} intereses.`);
-      return;
-    }
+  const openInterestModal = useCallback(() => {
+    setIsInterestModalOpen(true);
+  }, []);
 
-    const result = buildCustomInterest({
-      label: newInterestLabel,
-      keywordsInput: newInterestKeywords,
-      existingCatalog: interestCatalog
-    });
+  const closeInterestModal = useCallback(() => {
+    setIsInterestModalOpen(false);
+  }, []);
 
-    if (!result.interest) {
-      setManagerError(result.error ?? "No se pudo crear el interés.");
-      return;
-    }
-
-    setInterestCatalog((prev) => sortInterestCatalog([...prev, result.interest!]));
-    setSelectedInterestIds((prev) => [...prev, result.interest!.id]);
-    setNewInterestLabel("");
-    setNewInterestKeywords("");
-  }
-
-  function startEditInterest(interestId: string) {
-    const interest = interestCatalog.find((item) => item.id === interestId);
-    if (!interest) {
-      return;
-    }
-    setManagerError(null);
-    setEditingInterestId(interest.id);
-    setEditLabel(interest.label);
-    setEditKeywords(interest.keywords.join(", "));
-  }
-
-  function cancelEditInterest() {
-    setEditingInterestId(null);
-    setEditLabel("");
-    setEditKeywords("");
-  }
-
-  function saveEditInterest() {
-    if (!editingInterestId) {
-      return;
-    }
-    const current = interestCatalog.find((interest) => interest.id === editingInterestId);
-    if (!current) {
-      return;
-    }
-
-    const result = updateInterestDraft(current, {
-      label: editLabel,
-      keywordsInput: editKeywords
-    });
-
-    if (!result.interest) {
-      setManagerError(result.error ?? "No se pudo guardar el interés.");
-      return;
-    }
-
-    setManagerError(null);
-    setInterestCatalog((prev) =>
-      sortInterestCatalog(prev.map((interest) => (interest.id === current.id ? result.interest! : interest)))
-    );
-    cancelEditInterest();
-  }
-
-  function removeInterest(interestId: string) {
-    const interest = interestCatalog.find((item) => item.id === interestId);
-    if (!interest) {
-      return;
-    }
-
-    const shouldConfirm = window.confirm(
-      selectedInterestIds.includes(interestId)
-        ? `¿Eliminar "${interest.label}" del catálogo? También se desactivará en la selección actual.`
-        : `¿Eliminar "${interest.label}" del catálogo?`
-    );
-    if (!shouldConfirm) {
-      return;
-    }
-
-    setManagerError(null);
-    setInterestCatalog((prev) => prev.filter((item) => item.id !== interestId));
-    setSelectedInterestIds((prev) => prev.filter((id) => id !== interestId));
-    if (editingInterestId === interestId) {
-      cancelEditInterest();
-    }
-  }
-
-  function addSuggestedInterest(interestId: string) {
-    const suggested = interestSuggestions.find((interest) => interest.id === interestId);
-    if (!suggested) {
-      return;
-    }
-
-    setManagerError(null);
-    setInterestCatalog((prev) => sortInterestCatalog([...prev, suggested]));
-  }
+  const handleEmailChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setEmail(event.target.value);
+  }, []);
 
   const generatedDate = useMemo(() => {
     if (!summary?.generatedAt) {
@@ -354,91 +282,21 @@ export default function HomePage() {
       </section>
 
       <section className="panel">
-        <div className="section-head">
-          <h2 className="section-title">Intereses</h2>
-          <button type="button" className="button-secondary" onClick={() => setIsInterestModalOpen(true)}>
-            Gestionar intereses
-          </button>
-        </div>
-        <div className="grid">
-          {interestCatalog.map((interest) => (
-            <label className="interest" key={interest.id}>
-              <input
-                type="checkbox"
-                checked={selectedInterestIds.includes(interest.id)}
-                onChange={() => toggleInterest(interest.id)}
-              />
-              <span>
-                <strong>{interest.label}</strong>
-                <br />
-                <span className="small">
-                  {formatInterestCategory(interest.category)} · {interest.keywords.length} keywords
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
-
-        <h2 className="section-title">Fuentes Web (RSS)</h2>
-        <p className="small">
-          Elige desde qué páginas quieres sacar contenido. Puedes combinar tech y friki.
-        </p>
-        <div className="source-grid">
-          {SOURCES.map((source) => (
-            <label className="source-card" key={source.id}>
-              <input
-                type="checkbox"
-                checked={selectedSources.includes(source.id)}
-                onChange={() => toggleSource(source.id)}
-              />
-              <span className="source-copy">
-                <strong>{source.name}</strong>
-                <span className="small">{source.description}</span>
-                <a href={source.websiteUrl} target="_blank" rel="noreferrer">
-                  {toDomain(source.websiteUrl)}
-                </a>
-              </span>
-            </label>
-          ))}
-        </div>
-
-        <div className="suggestion-box">
-          <div className="suggestion-head">
-            <strong>Sugerencias automáticas de fuentes</strong>
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={applySuggestedSources}
-              disabled={sourceSuggestions.length === 0}
-            >
-              Agregar sugeridas
-            </button>
-          </div>
-          <p className="small">Basadas en tus intereses activos y en las fuentes ya seleccionadas.</p>
-          <div className="suggestion-list">
-            {sourceSuggestions.map((source) => (
-              <button
-                type="button"
-                className="suggestion-chip"
-                key={`suggest-source-${source.id}`}
-                onClick={() => addOneSource(source.id)}
-              >
-                + {source.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="email">Email (opcional, solo guardado local en el MVP)</label>
-          <input
-            id="email"
-            type="email"
-            placeholder="tu-email@dominio.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </div>
+        <InterestsSection
+          interestCatalog={interestCatalog}
+          selectedInterestIds={selectedInterestIds}
+          onToggleInterest={toggleInterest}
+          onOpenManager={openInterestModal}
+        />
+        <SourcesSection
+          selectedSources={selectedSources}
+          sourceSuggestions={sourceSuggestions}
+          email={email}
+          onToggleSource={toggleSource}
+          onApplySuggestedSources={applySuggestedSources}
+          onAddOneSource={addOneSource}
+          onEmailChange={handleEmailChange}
+        />
 
         <div className="actions">
           <button className="button" onClick={handleGenerate} disabled={!canGenerate}>
@@ -472,202 +330,211 @@ export default function HomePage() {
       </section>
 
       {summary ? (
-        <>
-          <section className="result-head">
-            <h2>Resultados ({summary.stats.totalReturned})</h2>
-            <div className="small">
-              {generatedDate ? <span className="success">Generado: {generatedDate}</span> : null}
-              <br />
-              <span>
-                Fuentes usadas: {summary.sources.length} | Candidatos: {summary.stats.totalCandidates} |
-                Límite total: {summary.limits.maxTotalItems}
-              </span>
-            </div>
-          </section>
-
-          <section className="cards">
-            {summary.items.length === 0 ? (
-              <p className="small">
-                No hubo coincidencias para las keywords actuales. Ajusta intereses o añade nuevas
-                keywords.
-              </p>
-            ) : (
-              summary.items.map((item) => (
-                <article className="card" key={item.id}>
-                  <h3>
-                    <a href={item.link} target="_blank" rel="noreferrer">
-                      {item.title}
-                    </a>
-                  </h3>
-                  <p className="meta">
-                    {item.source}
-                    {item.publishedAt ? ` · ${new Date(item.publishedAt).toLocaleString("es-ES")}` : ""}
-                  </p>
-                  <p>{item.summary}</p>
-                  <div className="tags">
-                    {item.matchedInterests.map((interest) => (
-                      <span className="tag" key={`${item.id}-${interest.id}`}>
-                        {interest.label}
-                      </span>
-                    ))}
-                  </div>
-                </article>
-              ))
-            )}
-          </section>
-
-          {summary.suggestedSources.length > 0 ? (
-            <section className="panel" style={{ marginTop: "1rem" }}>
-              <strong>Más fuentes sugeridas por el backend</strong>
-              <div className="suggestion-list" style={{ marginTop: "0.6rem" }}>
-                {summary.suggestedSources.map((source) => (
-                  <button
-                    type="button"
-                    className="suggestion-chip"
-                    key={`api-suggest-${source.id}`}
-                    onClick={() => addOneSource(source.id)}
-                  >
-                    + {source.name}
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </>
+        <SummaryResultsSection
+          summary={summary}
+          generatedDate={generatedDate}
+          onAddOneSource={addOneSource}
+        />
       ) : null}
 
       {isInterestModalOpen ? (
-        <div className="modal-backdrop" onClick={() => setIsInterestModalOpen(false)}>
-          <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Gestor de intereses</h2>
-              <button type="button" className="button-secondary" onClick={() => setIsInterestModalOpen(false)}>
-                Cerrar
-              </button>
-            </div>
-
-            <p className="small">
-              Crea, edita, elimina y recupera intereses. Máximo {MAX_INTERESTS_PER_USER} intereses.
-            </p>
-
-            {managerError ? (
-              <p className="small" style={{ color: "#b42318" }}>
-                {managerError}
-              </p>
-            ) : null}
-
-            <div className="modal-section">
-              <h3>Tu catálogo ({interestCatalog.length}/{MAX_INTERESTS_PER_USER})</h3>
-              <div className="manage-list">
-                {interestCatalog.map((interest) =>
-                  editingInterestId === interest.id ? (
-                    <div className="manage-item editing" key={`edit-${interest.id}`}>
-                      <div className="manage-main">
-                        <input
-                          className="modal-input"
-                          value={editLabel}
-                          onChange={(event) => setEditLabel(event.target.value)}
-                          placeholder="Nombre del interés"
-                        />
-                        <input
-                          className="modal-input"
-                          value={editKeywords}
-                          onChange={(event) => setEditKeywords(event.target.value)}
-                          placeholder="keywords separadas por coma"
-                        />
-                      </div>
-                      <div className="manage-actions">
-                        <button type="button" className="button-secondary" onClick={saveEditInterest}>
-                          Guardar
-                        </button>
-                        <button type="button" className="button-secondary" onClick={cancelEditInterest}>
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="manage-item" key={interest.id}>
-                      <div className="manage-main">
-                        <strong>{interest.label}</strong>
-                        <span className="small">
-                          {formatInterestCategory(interest.category)} · {interest.keywords.length} keywords
-                          {interest.isBuiltIn ? " · base" : " · custom"}
-                        </span>
-                        <span className="small">{interest.keywords.join(", ")}</span>
-                      </div>
-                      <div className="manage-actions">
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          onClick={() => startEditInterest(interest.id)}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          onClick={() => removeInterest(interest.id)}
-                        >
-                          {interest.isBuiltIn ? "Quitar" : "Eliminar"}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            <div className="modal-section">
-              <h3>Crear interés personalizado</h3>
-              <div className="modal-form">
-                <input
-                  className="modal-input"
-                  value={newInterestLabel}
-                  onChange={(event) => setNewInterestLabel(event.target.value)}
-                  placeholder="Nombre (ej: Warhammer)"
-                />
-                <input
-                  className="modal-input"
-                  value={newInterestKeywords}
-                  onChange={(event) => setNewInterestKeywords(event.target.value)}
-                  placeholder="keywords (ej: warhammer, 40k, space marine)"
-                />
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={createInterest}
-                  disabled={interestCatalog.length >= MAX_INTERESTS_PER_USER}
-                >
-                  Crear interés
-                </button>
-              </div>
-            </div>
-
-            <div className="modal-section">
-              <h3>Intereses sugeridos no instalados</h3>
-              {interestSuggestions.length === 0 ? (
-                <p className="small">Ya tienes todos los intereses base disponibles.</p>
-              ) : (
-                <div className="suggestion-list">
-                  {interestSuggestions.map((interest) => (
-                    <button
-                      type="button"
-                      className="suggestion-chip"
-                      key={`suggest-interest-${interest.id}`}
-                      onClick={() => addSuggestedInterest(interest.id)}
-                    >
-                      + {interest.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+        <InterestManagerModal
+          interestCatalog={interestCatalog}
+          selectedInterestIds={selectedInterestIds}
+          interestSuggestions={interestSuggestions}
+          onClose={closeInterestModal}
+          setInterestCatalog={setInterestCatalog}
+          setSelectedInterestIds={setSelectedInterestIds}
+        />
       ) : null}
     </main>
   );
 }
+
+const InterestsSection = memo(function InterestsSection({
+  interestCatalog,
+  selectedInterestIds,
+  onToggleInterest,
+  onOpenManager
+}: InterestsSectionProps) {
+  const selectedSet = useMemo(() => new Set(selectedInterestIds), [selectedInterestIds]);
+
+  return (
+    <>
+      <div className="section-head">
+        <h2 className="section-title">Intereses</h2>
+        <button type="button" className="button-secondary" onClick={onOpenManager}>
+          Gestionar intereses
+        </button>
+      </div>
+      <div className="grid">
+        {interestCatalog.map((interest) => (
+          <label className="interest" key={interest.id}>
+            <input
+              type="checkbox"
+              checked={selectedSet.has(interest.id)}
+              onChange={() => onToggleInterest(interest.id)}
+            />
+            <span>
+              <strong>{interest.label}</strong>
+              <br />
+              <span className="small">
+                {formatInterestCategory(interest.category)} · {interest.keywords.length} keywords
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </>
+  );
+});
+
+const SourcesSection = memo(function SourcesSection({
+  selectedSources,
+  sourceSuggestions,
+  email,
+  onToggleSource,
+  onApplySuggestedSources,
+  onAddOneSource,
+  onEmailChange
+}: SourcesSectionProps) {
+  const selectedSet = useMemo(() => new Set(selectedSources), [selectedSources]);
+
+  return (
+    <>
+      <h2 className="section-title">Fuentes Web (RSS)</h2>
+      <p className="small">
+        Elige desde qué páginas quieres sacar contenido. Puedes combinar tech y friki.
+      </p>
+      <div className="source-grid">
+        {SOURCES.map((source) => (
+          <label className="source-card" key={source.id}>
+            <input
+              type="checkbox"
+              checked={selectedSet.has(source.id)}
+              onChange={() => onToggleSource(source.id)}
+            />
+            <span className="source-copy">
+              <strong>{source.name}</strong>
+              <span className="small">{source.description}</span>
+              <a href={source.websiteUrl} target="_blank" rel="noreferrer">
+                {toDomain(source.websiteUrl)}
+              </a>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="suggestion-box">
+        <div className="suggestion-head">
+          <strong>Sugerencias automáticas de fuentes</strong>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={onApplySuggestedSources}
+            disabled={sourceSuggestions.length === 0}
+          >
+            Agregar sugeridas
+          </button>
+        </div>
+        <p className="small">Basadas en tus intereses activos y en las fuentes ya seleccionadas.</p>
+        <div className="suggestion-list">
+          {sourceSuggestions.map((source) => (
+            <button
+              type="button"
+              className="suggestion-chip"
+              key={`suggest-source-${source.id}`}
+              onClick={() => onAddOneSource(source.id)}
+            >
+              + {source.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="email">Email (opcional, solo guardado local en el MVP)</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="tu-email@dominio.com"
+          value={email}
+          onChange={onEmailChange}
+        />
+      </div>
+    </>
+  );
+});
+
+const SummaryResultsSection = memo(function SummaryResultsSection({
+  summary,
+  generatedDate,
+  onAddOneSource
+}: SummaryResultsSectionProps) {
+  return (
+    <>
+      <section className="result-head">
+        <h2>Resultados ({summary.stats.totalReturned})</h2>
+        <div className="small">
+          {generatedDate ? <span className="success">Generado: {generatedDate}</span> : null}
+          <br />
+          <span>
+            Fuentes usadas: {summary.sources.length} | Candidatos: {summary.stats.totalCandidates} |
+            Límite total: {summary.limits.maxTotalItems}
+          </span>
+        </div>
+      </section>
+
+      <section className="cards">
+        {summary.items.length === 0 ? (
+          <p className="small">
+            No hubo coincidencias para las keywords actuales. Ajusta intereses o añade nuevas keywords.
+          </p>
+        ) : (
+          summary.items.map((item) => (
+            <article className="card" key={item.id}>
+              <h3>
+                <a href={item.link} target="_blank" rel="noreferrer">
+                  {item.title}
+                </a>
+              </h3>
+              <p className="meta">
+                {item.source}
+                {item.publishedAt ? ` · ${new Date(item.publishedAt).toLocaleString("es-ES")}` : ""}
+              </p>
+              <p>{item.summary}</p>
+              <div className="tags">
+                {item.matchedInterests.map((interest) => (
+                  <span className="tag" key={`${item.id}-${interest.id}`}>
+                    {interest.label}
+                  </span>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
+      </section>
+
+      {summary.suggestedSources.length > 0 ? (
+        <section className="panel" style={{ marginTop: "1rem" }}>
+          <strong>Más fuentes sugeridas por el backend</strong>
+          <div className="suggestion-list" style={{ marginTop: "0.6rem" }}>
+            {summary.suggestedSources.map((source) => (
+              <button
+                type="button"
+                className="suggestion-chip"
+                key={`api-suggest-${source.id}`}
+                onClick={() => onAddOneSource(source.id)}
+              >
+                + {source.name}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+});
 
 function formatInterestCategory(category: InterestDefinition["category"]): string {
   if (category === "tech") {
@@ -719,4 +586,3 @@ function isStoredPreferencesV2(value: unknown): value is StoredPreferencesV2 {
   }
   return (value as StoredPreferencesV2).version === STORAGE_VERSION;
 }
-
