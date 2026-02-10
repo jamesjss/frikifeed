@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
 import type { InterestDefinition } from "@/lib/interests";
-import { SOURCES, getSourcesByIds, type SourceConfig, type SourceId } from "@/lib/sources";
+import { SOURCES, type SourceConfig } from "@/lib/sources";
 
 type CustomFeedItem = {
   title?: string;
@@ -17,7 +17,7 @@ type NormalizedItem = {
   id: string;
   title: string;
   link: string;
-  sourceId: SourceId;
+  sourceId: string;
   source: string;
   publishedAt: string | null;
   text: string;
@@ -43,7 +43,7 @@ export type SummaryItem = {
   id: string;
   title: string;
   link: string;
-  sourceId: SourceId;
+  sourceId: string;
   source: string;
   publishedAt: string | null;
   summary: string;
@@ -77,15 +77,15 @@ const parser = new Parser<Record<string, never>, CustomFeedItem>({
 
 export async function buildSummary(
   selectedInterests: InterestDefinition[],
-  selectedSourceIds: SourceId[]
+  selectedSources: SourceConfig[]
 ): Promise<SummaryResult> {
   const selectedKeywords = Array.from(getSelectedKeywords(selectedInterests));
   const interestMatchers = buildInterestMatchers(selectedInterests);
   const warnings: string[] = [];
-  const selectedSources = selectedSourceIds.length > 0 ? getSourcesByIds(selectedSourceIds) : SOURCES;
+  const feeds = selectedSources.length > 0 ? selectedSources : SOURCES;
 
   const perFeedResults = await Promise.all(
-    selectedSources.map(async (feed) => {
+    feeds.map(async (feed) => {
       try {
         return await loadFeedItems(feed);
       } catch (error) {
@@ -309,20 +309,63 @@ function compareDates(a: string | null, b: string | null): number {
 }
 
 function toStringValue(value: unknown): string {
+  return toStringValueWithDepth(value, 0);
+}
+
+const RSS_TEXT_KEYS = [
+  "_",
+  "#text",
+  "text",
+  "value",
+  "content",
+  "contentEncoded",
+  "contentSnippet",
+  "title"
+];
+
+function toStringValueWithDepth(value: unknown, depth: number): string {
+  if (depth > 4) {
+    return "";
+  }
   if (typeof value === "string") {
     return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
   }
   if (value === null || value === undefined) {
     return "";
   }
   if (Array.isArray(value)) {
-    return value.map((item) => toStringValue(item)).join(" ");
+    return value
+      .map((item) => toStringValueWithDepth(item, depth + 1))
+      .filter(Boolean)
+      .join(" ");
   }
-  return String(value);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of RSS_TEXT_KEYS) {
+      if (!(key in record)) {
+        continue;
+      }
+      const extracted = toStringValueWithDepth(record[key], depth + 1);
+      if (extracted) {
+        return extracted;
+      }
+    }
+  }
+
+  try {
+    const text = String(value);
+    return text === "[object Object]" ? "" : text;
+  } catch {
+    return "";
+  }
 }
 
 export const __rssPipelineTestables = {
   getSelectedKeywords,
   buildInterestMatchers,
-  scoreItem
+  scoreItem,
+  toStringValue
 };

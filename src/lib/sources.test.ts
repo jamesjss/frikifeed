@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { InterestDefinition } from "@/lib/interests";
-import { SOURCES, suggestSources } from "@/lib/sources";
+import { buildRealRssRecommendations, suggestSources } from "@/lib/sources";
 
 const selectedInterests: InterestDefinition[] = [
   {
@@ -34,15 +34,43 @@ test("suggestSources excluye fuentes seleccionadas y prioriza relacionadas", () 
   );
 });
 
-test("suggestSources usa fallback estable cuando no hay señales", () => {
+test("suggestSources devuelve vacío cuando no hay señales", () => {
   const suggestions = suggestSources({
     selectedSourceIds: [],
     selectedInterests: [],
     limit: 3
   });
 
-  assert.deepEqual(
-    suggestions.map((source) => source.id),
-    SOURCES.slice(0, 3).map((source) => source.id)
+  assert.deepEqual(suggestions, []);
+});
+
+test("buildRealRssRecommendations crea feeds reales para intereses custom", () => {
+  const customInterest: InterestDefinition = {
+    id: "cafeteras",
+    label: "Cafeteras",
+    keywords: ["cafe", "espresso", "barista"],
+    category: "custom",
+    isBuiltIn: false
+  };
+
+  const recommendations = buildRealRssRecommendations([customInterest], 3);
+
+  assert.equal(recommendations.length, 3);
+  assert.equal(
+    recommendations.every((source) => source.feedUrl.startsWith("https://")),
+    true
   );
+  assert.equal(
+    recommendations.some((source) => source.feedUrl.includes("news.google.com/rss/search")),
+    true
+  );
+  assert.equal(
+    recommendations.some((source) => source.feedUrl.includes("bing.com/news/search")),
+    true
+  );
+});
+
+test("buildRealRssRecommendations ignora intereses no custom", () => {
+  const recommendations = buildRealRssRecommendations(selectedInterests, 4);
+  assert.deepEqual(recommendations, []);
 });

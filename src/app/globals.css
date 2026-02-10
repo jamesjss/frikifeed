@@ -122,6 +122,44 @@ a {
   text-decoration: none;
 }
 
+.source-mode-card {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fffcf5;
+  padding: 0.8rem;
+}
+
+.source-pill-list {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.source-pill {
+  border: 1px solid #c8dfe4;
+  background: #eef8fa;
+  color: #0b4e5a;
+  border-radius: 999px;
+  padding: 0.24rem 0.62rem;
+  font-size: 0.8rem;
+}
+
+.source-pill-muted {
+  background: #f2f2f2;
+  border-color: #dcdcdc;
+  color: #6f665c;
+}
+
+.source-custom-panel {
+  margin-top: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: #fffdf8;
+}
+
 .suggestion-box {
   margin-top: 0.9rem;
   border: 1px dashed var(--border);

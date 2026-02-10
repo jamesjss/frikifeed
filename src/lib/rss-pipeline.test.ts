@@ -66,3 +66,22 @@ test("scoreItem devuelve score 0 cuando no hay matches", () => {
   assert.deepEqual(scored.matchedKeywords, []);
   assert.deepEqual(scored.matchedInterests, []);
 });
+
+test("toStringValue no rompe con objetos no convertibles", () => {
+  const uncoercibleObject = {
+    toString() {
+      return {} as unknown as string;
+    },
+    valueOf() {
+      return {} as unknown as number;
+    }
+  };
+
+  assert.doesNotThrow(() => __rssPipelineTestables.toStringValue(uncoercibleObject));
+  assert.equal(__rssPipelineTestables.toStringValue(uncoercibleObject), "");
+});
+
+test("toStringValue extrae texto de objetos RSS comunes", () => {
+  const rssTextObject = { _: "Kotaku feed item" };
+  assert.equal(__rssPipelineTestables.toStringValue(rssTextObject), "Kotaku feed item");
+});

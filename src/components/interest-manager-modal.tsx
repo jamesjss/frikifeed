@@ -140,10 +140,16 @@ export default function InterestManagerModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section className="modal-panel" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" onClick={onClose} role="presentation">
+      <section
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="interest-manager-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="modal-head">
-          <h2>Gestor de intereses</h2>
+          <h2 id="interest-manager-title">Gestor de intereses</h2>
           <button type="button" className="button-secondary" onClick={onClose}>
             Cerrar
           </button>

@@ -8,6 +8,7 @@ export type SourceConfig = {
   description: string;
   topics: string[];
   relatedSourceIds: string[];
+  isRecommended?: boolean;
 };
 
 export type SourceId = string;
@@ -56,7 +57,8 @@ export const SOURCES: SourceConfig[] = [
     feedUrl: "https://feeds.feedburner.com/Baeldung",
     description: "Tutoriales prácticos de backend, Java y seguridad.",
     topics: ["java-spring", "backend", "seguridad", "mobile"],
-    relatedSourceIds: ["infoq-java", "spring-blog"]
+    relatedSourceIds: ["infoq-java", "spring-blog"],
+    isRecommended: false
   },
   {
     id: "devops-com",
@@ -244,6 +246,41 @@ type SuggestSourcesInput = {
   limit?: number;
 };
 
+type DynamicSourceTemplate = {
+  suffix: string;
+  namePrefix: string;
+  websiteUrl: string;
+  description: string;
+  buildFeedUrl: (query: string) => string;
+};
+
+const DYNAMIC_RSS_TEMPLATES: DynamicSourceTemplate[] = [
+  {
+    suffix: "gnews",
+    namePrefix: "Google News",
+    websiteUrl: "https://news.google.com",
+    description: "Busqueda de noticias en tiempo real usando Google News RSS.",
+    buildFeedUrl: (query) =>
+      `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=es-419&gl=ES&ceid=ES:es`
+  },
+  {
+    suffix: "bing-news",
+    namePrefix: "Bing News",
+    websiteUrl: "https://www.bing.com/news",
+    description: "Busqueda de noticias usando el feed RSS de Bing News.",
+    buildFeedUrl: (query) =>
+      `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS`
+  },
+  {
+    suffix: "gnews-global",
+    namePrefix: "Google News Global",
+    websiteUrl: "https://news.google.com",
+    description: "Busqueda de noticias globales en Google News RSS.",
+    buildFeedUrl: (query) =>
+      `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`
+  }
+];
+
 export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
   const { selectedSourceIds, selectedInterests, limit = 4 } = input;
   const selectedSet = new Set(selectedSourceIds);
@@ -252,7 +289,9 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
   const selectedTopicTokens = buildSelectedTopicTokens(selectedSources);
   const relatedSourceIds = buildRelatedSourceIds(selectedSources);
 
-  const scored = SOURCES.filter((source) => !selectedSet.has(source.id))
+  const scored = SOURCES.filter(
+    (source) => source.isRecommended !== false && !selectedSet.has(source.id)
+  )
     .map((source) => {
       let score = 0;
       const sourceTokens = new Set(source.topics.map(normalizeToken));
@@ -283,14 +322,57 @@ export function suggestSources(input: SuggestSourcesInput): SourceConfig[] {
     })
     .filter(({ score }) => score > 0);
 
-  if (scored.length === 0) {
-    return SOURCES.filter((source) => !selectedSet.has(source.id)).slice(0, limit);
-  }
-
   return scored
     .sort((a, b) => b.score - a.score || a.source.name.localeCompare(b.source.name, "es"))
     .slice(0, limit)
     .map(({ source }) => source);
+}
+
+export function buildRealRssRecommendations(
+  selectedInterests: InterestDefinition[],
+  limit = 6
+): SourceConfig[] {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const customInterests = selectedInterests.filter((interest) => interest.category === "custom");
+  if (customInterests.length === 0) {
+    return [];
+  }
+
+  const recommendations: SourceConfig[] = [];
+  const seenFeedUrls = new Set<string>();
+
+  for (const interest of customInterests) {
+    const query = buildInterestSearchQuery(interest);
+    const topics = buildDynamicTopics(interest);
+    const interestIdSlug = toSlug(interest.id || interest.label || "custom");
+
+    for (const template of DYNAMIC_RSS_TEMPLATES) {
+      if (recommendations.length >= limit) {
+        return recommendations;
+      }
+
+      const feedUrl = template.buildFeedUrl(query);
+      if (seenFeedUrls.has(feedUrl)) {
+        continue;
+      }
+
+      recommendations.push({
+        id: `dynamic-${interestIdSlug}-${template.suffix}`,
+        name: `${template.namePrefix} · ${interest.label}`,
+        websiteUrl: template.websiteUrl,
+        feedUrl,
+        description: template.description,
+        topics,
+        relatedSourceIds: []
+      });
+      seenFeedUrls.add(feedUrl);
+    }
+  }
+
+  return recommendations;
 }
 
 function buildInterestTokens(interests: InterestDefinition[]): Set<string> {
@@ -344,4 +426,43 @@ function hasTokenOverlap(base: Set<string>, incoming: Set<string>): boolean {
     }
   }
   return false;
+}
+
+function buildInterestSearchQuery(interest: InterestDefinition): string {
+  const terms: string[] = [interest.label, ...interest.keywords]
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0);
+
+  const deduped = new Set<string>();
+  for (const term of terms) {
+    const normalized = normalizeToken(term);
+    if (!normalized || deduped.has(normalized)) {
+      continue;
+    }
+    deduped.add(normalized);
+    if (deduped.size >= 4) {
+      break;
+    }
+  }
+
+  return Array.from(deduped).join(" ");
+}
+
+function buildDynamicTopics(interest: InterestDefinition): string[] {
+  const topics = new Set<string>();
+  const candidates = [interest.id, interest.label, ...interest.keywords.slice(0, 4)];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeToken(candidate);
+    if (normalized.length > 0) {
+      topics.add(normalized);
+    }
+  }
+
+  return Array.from(topics);
+}
+
+function toSlug(value: string): string {
+  const slug = normalizeToken(value).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "custom";
 }
