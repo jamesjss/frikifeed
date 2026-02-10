@@ -1,6 +1,6 @@
 import Parser from "rss-parser";
-import { INTERESTS, type InterestKey } from "@/lib/interests";
-import { SOURCES, getSourcesByIds, type SourceConfig, type SourceId } from "@/lib/sources";
+import type { InterestDefinition } from "@/lib/interests";
+import { SOURCES, type SourceConfig } from "@/lib/sources";
 
 type CustomFeedItem = {
   title?: string;
@@ -17,7 +17,7 @@ type NormalizedItem = {
   id: string;
   title: string;
   link: string;
-  sourceId: SourceId;
+  sourceId: string;
   source: string;
   publishedAt: string | null;
   text: string;
@@ -28,16 +28,27 @@ type CachedFeed = {
   items: NormalizedItem[];
 };
 
+type MatchedInterest = {
+  id: string;
+  label: string;
+};
+
+type InterestMatcher = {
+  id: string;
+  label: string;
+  keywords: string[];
+};
+
 export type SummaryItem = {
   id: string;
   title: string;
   link: string;
-  sourceId: SourceId;
+  sourceId: string;
   source: string;
   publishedAt: string | null;
   summary: string;
   matchedKeywords: string[];
-  matchedInterests: InterestKey[];
+  matchedInterests: MatchedInterest[];
 };
 
 export type SummaryResult = {
@@ -65,18 +76,18 @@ const parser = new Parser<Record<string, never>, CustomFeedItem>({
 });
 
 export async function buildSummary(
-  selectedInterests: InterestKey[],
-  selectedSourceIds: SourceId[]
+  selectedInterests: InterestDefinition[],
+  selectedSources: SourceConfig[]
 ): Promise<SummaryResult> {
-  const selectedKeywords = getSelectedKeywords(selectedInterests);
+  const selectedKeywords = Array.from(getSelectedKeywords(selectedInterests));
+  const interestMatchers = buildInterestMatchers(selectedInterests);
   const warnings: string[] = [];
-  const selectedSources = selectedSourceIds.length > 0 ? getSourcesByIds(selectedSourceIds) : SOURCES;
+  const feeds = selectedSources.length > 0 ? selectedSources : SOURCES;
 
   const perFeedResults = await Promise.all(
-    selectedSources.map(async (feed) => {
+    feeds.map(async (feed) => {
       try {
-        const items = await loadFeedItems(feed);
-        return items;
+        return await loadFeedItems(feed);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown error";
         warnings.push(`No se pudo leer ${feed.name}: ${detail}`);
@@ -87,25 +98,23 @@ export async function buildSummary(
 
   const dedupedItems = dedupeItems(perFeedResults.flat());
   const scoredItems = dedupedItems
-    .map((item) => scoreItem(item, selectedInterests, selectedKeywords))
-    .filter((item): item is ReturnType<typeof scoreItem> & { score: number } => item.score > 0)
+    .map((item) => scoreItem(item, interestMatchers, selectedKeywords))
+    .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || compareDates(b.publishedAt, a.publishedAt))
     .slice(0, MAX_TOTAL_ITEMS);
 
-  const items: SummaryItem[] = scoredItems.map((item) => ({
-    id: item.id,
-    title: item.title,
-    link: item.link,
-    sourceId: item.sourceId,
-    source: item.source,
-    publishedAt: item.publishedAt,
-    summary: createSummary(item.text, item.title),
-    matchedKeywords: item.matchedKeywords,
-    matchedInterests: item.matchedInterests
-  }));
-
   return {
-    items,
+    items: scoredItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      link: item.link,
+      sourceId: item.sourceId,
+      source: item.source,
+      publishedAt: item.publishedAt,
+      summary: createSummary(item.text, item.title),
+      matchedKeywords: item.matchedKeywords,
+      matchedInterests: item.matchedInterests
+    })),
     warnings,
     totalCandidates: dedupedItems.length
   };
@@ -132,8 +141,8 @@ async function loadFeedItems(feed: SourceConfig): Promise<NormalizedItem[]> {
 }
 
 function normalizeItem(item: CustomFeedItem, feed: SourceConfig, index: number): NormalizedItem | null {
-  const title = normalizeText(item.title ?? "");
-  const link = normalizeUrl(item.link ?? "");
+  const title = normalizeText(item.title);
+  const link = normalizeUrl(item.link);
   if (!title || !link) {
     return null;
   }
@@ -157,7 +166,7 @@ function buildItemText(item: CustomFeedItem): string {
   return normalizeText(
     [item.contentSnippet, item.contentEncoded, item.content, item.title]
       .filter(Boolean)
-      .map((part) => stripHtml(part ?? ""))
+      .map((part) => stripHtml(part))
       .join(" ")
   );
 }
@@ -171,7 +180,6 @@ function dedupeItems(items: NormalizedItem[]): NormalizedItem[] {
       map.set(key, item);
       continue;
     }
-
     if (compareDates(item.publishedAt, existing.publishedAt) > 0) {
       map.set(key, item);
     }
@@ -179,29 +187,53 @@ function dedupeItems(items: NormalizedItem[]): NormalizedItem[] {
   return Array.from(map.values());
 }
 
-function getSelectedKeywords(interests: InterestKey[]): Set<string> {
+function getSelectedKeywords(interests: InterestDefinition[]): Set<string> {
   const keywords = new Set<string>();
   for (const interest of interests) {
-    for (const keyword of INTERESTS[interest].keywords) {
-      keywords.add(keyword.toLowerCase());
+    for (const keyword of interest.keywords) {
+      const normalized = keyword.toLowerCase().trim();
+      if (normalized) {
+        keywords.add(normalized);
+      }
     }
   }
   return keywords;
 }
 
-function scoreItem(item: NormalizedItem, selectedInterests: InterestKey[], selectedKeywords: Set<string>) {
+function buildInterestMatchers(interests: InterestDefinition[]): InterestMatcher[] {
+  return interests.map((interest) => ({
+    id: interest.id,
+    label: interest.label,
+    keywords: interest.keywords.map((keyword) => keyword.toLowerCase().trim()).filter(Boolean)
+  }));
+}
+
+function scoreItem(
+  item: NormalizedItem,
+  interestMatchers: InterestMatcher[],
+  selectedKeywords: string[]
+) {
   const haystack = `${item.title} ${item.text}`.toLowerCase();
-  const matchedKeywords = [...selectedKeywords].filter((keyword) => haystack.includes(keyword));
+  const matchedKeywords: string[] = [];
+  for (const keyword of selectedKeywords) {
+    if (haystack.includes(keyword)) {
+      matchedKeywords.push(keyword);
+    }
+  }
 
-  const matchedInterests = selectedInterests.filter((interest) =>
-    INTERESTS[interest].keywords.some((keyword) => haystack.includes(keyword.toLowerCase()))
-  );
+  const matchedInterests: MatchedInterest[] = [];
+  for (const interest of interestMatchers) {
+    if (interest.keywords.some((keyword) => haystack.includes(keyword))) {
+      matchedInterests.push({ id: interest.id, label: interest.label });
+    }
+  }
 
+  const score = matchedKeywords.length + matchedInterests.length * 2;
   return {
     ...item,
     matchedKeywords,
     matchedInterests,
-    score: matchedKeywords.length
+    score
   };
 }
 
@@ -223,17 +255,19 @@ function createSummary(text: string, title: string): string {
   return `${cleaned.slice(0, 237)}...`;
 }
 
-function normalizeText(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+function normalizeText(value: unknown): string {
+  const text = toStringValue(value);
+  return text.replace(/\s+/g, " ").trim();
 }
 
-function normalizeUrl(value: string): string {
-  if (!value) {
+function normalizeUrl(value: unknown): string {
+  const raw = toStringValue(value);
+  if (!raw) {
     return "";
   }
 
   try {
-    const url = new URL(value);
+    const url = new URL(raw);
     url.hash = "";
     const trackingParams = [
       "utm_source",
@@ -249,7 +283,7 @@ function normalizeUrl(value: string): string {
     }
     return url.toString();
   } catch {
-    return value.trim();
+    return raw.trim();
   }
 }
 
@@ -257,17 +291,15 @@ function normalizeDate(value?: string): string | null {
   if (!value) {
     return null;
   }
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return null;
   }
-
   return date.toISOString();
 }
 
-function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, " ");
+function stripHtml(value: unknown): string {
+  return toStringValue(value).replace(/<[^>]*>/g, " ");
 }
 
 function compareDates(a: string | null, b: string | null): number {
@@ -275,3 +307,65 @@ function compareDates(a: string | null, b: string | null): number {
   const bTime = b ? new Date(b).getTime() : 0;
   return aTime - bTime;
 }
+
+function toStringValue(value: unknown): string {
+  return toStringValueWithDepth(value, 0);
+}
+
+const RSS_TEXT_KEYS = [
+  "_",
+  "#text",
+  "text",
+  "value",
+  "content",
+  "contentEncoded",
+  "contentSnippet",
+  "title"
+];
+
+function toStringValueWithDepth(value: unknown, depth: number): string {
+  if (depth > 4) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toStringValueWithDepth(item, depth + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of RSS_TEXT_KEYS) {
+      if (!(key in record)) {
+        continue;
+      }
+      const extracted = toStringValueWithDepth(record[key], depth + 1);
+      if (extracted) {
+        return extracted;
+      }
+    }
+  }
+
+  try {
+    const text = String(value);
+    return text === "[object Object]" ? "" : text;
+  } catch {
+    return "";
+  }
+}
+
+export const __rssPipelineTestables = {
+  getSelectedKeywords,
+  buildInterestMatchers,
+  scoreItem,
+  toStringValue
+};
